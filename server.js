@@ -8,20 +8,15 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-const GOFILE_API_TOKEN = process.env.GOFILE_API_TOKEN;
+const upload = multer({ storage: multer.memoryStorage() });
 
-/* ---------- Middlewares ---------- */
 app.use(cors());
 app.use(express.json());
 
-const upload = multer({
-  limits: {
-    fileSize: 5 * 1024 * 1024 * 1024 // 5GB limit
-  }
-});
+const PORT = process.env.PORT || 3000;
+const GOFILE_TOKEN = process.env.GOFILE_API_TOKEN;
 
-/* ---------- Health Check ---------- */
+/* ===== TEST ROUTE ===== */
 app.get("/", (req, res) => {
   res.json({
     status: "ok",
@@ -29,64 +24,47 @@ app.get("/", (req, res) => {
   });
 });
 
-/* ---------- Upload Route ---------- */
+/* ===== UPLOAD ROUTE ===== */
 app.post("/upload", upload.single("file"), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: "No file uploaded" });
     }
 
-    /* 1️⃣ Get best GoFile server */
+    // 1️⃣ Get best GoFile server
     const serverRes = await fetch("https://api.gofile.io/servers");
     const serverData = await serverRes.json();
-
-    if (serverData.status !== "ok") {
-      throw new Error("Failed to get GoFile server");
-    }
-
     const server = serverData.data.servers[0].name;
 
-    /* 2️⃣ Upload file to GoFile */
+    // 2️⃣ Upload to GoFile
     const form = new FormData();
     form.append("file", req.file.buffer, req.file.originalname);
+    form.append("token", GOFILE_TOKEN);
 
     const uploadRes = await fetch(
       `https://${server}.gofile.io/uploadFile`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${GOFILE_API_TOKEN}`
-        },
-        body: form
-      }
+      { method: "POST", body: form }
     );
 
     const uploadData = await uploadRes.json();
 
     if (uploadData.status !== "ok") {
-      throw new Error("GoFile upload failed");
+      return res.status(500).json({ error: "GoFile upload failed" });
     }
 
-    const downloadLink = uploadData.data.downloadPage;
-
-    /* 3️⃣ Send response */
     res.json({
       success: true,
-      fileName: req.file.originalname,
-      size: req.file.size,
-      downloadLink
+      downloadPage: uploadData.data.downloadPage,
+      directLink: uploadData.data.directLink
     });
 
   } catch (err) {
-    console.error("UPLOAD ERROR:", err.message);
-    res.status(500).json({
-      success: false,
-      error: err.message
-    });
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
   }
 });
 
-/* ---------- Start Server ---------- */
+/* ===== START SERVER ===== */
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
