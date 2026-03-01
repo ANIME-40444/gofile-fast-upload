@@ -1,61 +1,92 @@
 import express from "express";
 import multer from "multer";
-import cors from "cors";
-import axios from "axios";
-import fs from "fs";
+import fetch from "node-fetch";
 import FormData from "form-data";
+import cors from "cors";
 import dotenv from "dotenv";
 
 dotenv.config();
 
 const app = express();
+const PORT = process.env.PORT || 3000;
+const GOFILE_API_TOKEN = process.env.GOFILE_API_TOKEN;
+
+/* ---------- Middlewares ---------- */
 app.use(cors());
+app.use(express.json());
 
-const upload = multer({ dest: "uploads/" });
-
-app.get("/", (req, res) => {
-  res.send("GoFile Fast Backend Running ✅");
+const upload = multer({
+  limits: {
+    fileSize: 5 * 1024 * 1024 * 1024 // 5GB limit
+  }
 });
 
+/* ---------- Health Check ---------- */
+app.get("/", (req, res) => {
+  res.json({
+    status: "ok",
+    message: "GoFile Fast Upload Server Running 🚀"
+  });
+});
+
+/* ---------- Upload Route ---------- */
 app.post("/upload", upload.single("file"), async (req, res) => {
   try {
-    const filePath = req.file.path;
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
 
-    // Get best server
-    const serverRes = await axios.get("https://api.gofile.io/getServer");
-    const server = serverRes.data.data.server;
+    /* 1️⃣ Get best GoFile server */
+    const serverRes = await fetch("https://api.gofile.io/servers");
+    const serverData = await serverRes.json();
 
-    // Upload file
+    if (serverData.status !== "ok") {
+      throw new Error("Failed to get GoFile server");
+    }
+
+    const server = serverData.data.servers[0].name;
+
+    /* 2️⃣ Upload file to GoFile */
     const form = new FormData();
-    form.append("file", fs.createReadStream(filePath));
+    form.append("file", req.file.buffer, req.file.originalname);
 
-    const uploadRes = await axios.post(
+    const uploadRes = await fetch(
       `https://${server}.gofile.io/uploadFile`,
-      form,
       {
+        method: "POST",
         headers: {
-          ...form.getHeaders(),
-          Authorization: `Bearer ${process.env.GOFILE_API_TOKEN}`
-        }
+          Authorization: `Bearer ${GOFILE_API_TOKEN}`
+        },
+        body: form
       }
     );
 
-    fs.unlinkSync(filePath);
+    const uploadData = await uploadRes.json();
 
+    if (uploadData.status !== "ok") {
+      throw new Error("GoFile upload failed");
+    }
+
+    const downloadLink = uploadData.data.downloadPage;
+
+    /* 3️⃣ Send response */
     res.json({
       success: true,
-      downloadLink: uploadRes.data.data.downloadPage
+      fileName: req.file.originalname,
+      size: req.file.size,
+      downloadLink
     });
 
   } catch (err) {
-    console.error(err);
+    console.error("UPLOAD ERROR:", err.message);
     res.status(500).json({
       success: false,
-      error: "Upload failed"
+      error: err.message
     });
   }
 });
 
-app.listen(process.env.PORT, () => {
-  console.log("Server running on port", process.env.PORT);
+/* ---------- Start Server ---------- */
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
 });
