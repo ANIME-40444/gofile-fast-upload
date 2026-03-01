@@ -1,5 +1,5 @@
 {
-  "name": "gofile-fast-backend",
+  "name": "gofile-fast-upload",
   "version": "1.0.0",
   "type": "module",
   "main": "server.js",
